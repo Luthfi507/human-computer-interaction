@@ -10,17 +10,19 @@ def register_filter(func):
 
 @register_filter
 def filter_1(image_rgb: np.ndarray):
+    out = image_rgb.copy()
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
 
-    image_rgb[gray < 60] = (15, 8, 10)
-    image_rgb[(gray >= 60) & (gray < 130)] = (118, 30, 214)
-    image_rgb[(gray >= 130) & (gray < 195)] = (35, 140, 235)
-    image_rgb[gray >= 195] = (235, 240, 240)
+    out[gray < 60] = (15, 8, 10)
+    out[(gray >= 60) & (gray < 130)] = (118, 30, 214)
+    out[(gray >= 130) & (gray < 195)] = (35, 140, 235)
+    out[gray >= 195] = (235, 240, 240)
 
-    return image_rgb
+    return out
 
 @register_filter
 def filter_2(image_rgb: np.ndarray):
+    out = image_rgb.copy()
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
     h, w = gray.shape
 
@@ -33,9 +35,8 @@ def filter_2(image_rgb: np.ndarray):
     radius = (1 - gray / 255.0) * (cell / 1.4)
     dot_mask = dist_center < radius
 
-    image_rgb[dot_mask] = (15, 15, 15)
-
-    return image_rgb
+    out[dot_mask] = (15, 15, 15)
+    return out
 
 @register_filter
 def filter_3(image_rgb: np.ndarray):    
@@ -45,9 +46,9 @@ def filter_3(image_rgb: np.ndarray):
     b_shift = np.roll(b, shift, axis=1)
 
     out = cv2.merge([b_shift, g, r_shift])
-    image_rgb[::3, :, :] = (out[::3, :, :] * 5).astype(np.uint8)
+    out[::3, :, :] = (out[::3, :, :] * 5).astype(np.uint8)
 
-    return image_rgb
+    return out
 
 @register_filter
 def filter_4(image_rgb: np.ndarray):
@@ -85,6 +86,7 @@ def filter_6(image_rgb: np.ndarray):
 
 @register_filter
 def filter_7(image_rgb: np.ndarray):
+    out = image_rgb.copy()
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2GRAY)
     h, w = gray.shape
     cell = 5
@@ -97,17 +99,18 @@ def filter_7(image_rgb: np.ndarray):
     radius = (1 - gray / 255.0) * (cell / 1.3)
     dot_mask = dist_center < radius
 
-    image_rgb[dot_mask] = (55, 20, 130)
-    return image_rgb
+    out[dot_mask] = (55, 20, 130)
+    return out
 
 @register_filter
 def filter_8(image_rgb: np.ndarray):
+    out = image_rgb.copy()
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2GRAY)
     _, mask = cv2.threshold(gray, 110, 255, cv2.THRESH_BINARY)
 
-    image_rgb[mask == 255] = (10, 140, 255)
-    image_rgb[mask == 0] = (180, 30, 220)
-    return image_rgb
+    out[mask == 255] = (10, 140, 255)
+    out[mask == 0] = (180, 30, 220)
+    return out
 
 @register_filter
 def filter_9(image_rgb: np.ndarray):
