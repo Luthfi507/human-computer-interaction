@@ -7,10 +7,18 @@ class HandController:
         self.start_time = None
         self.was_pinching = False
 
-    def is_pinch(self, landmarks, threshold):
-        thumb_tip = landmarks[4]
-        index_tip = landmarks[8]
-        distance = ((thumb_tip.x - index_tip.x)**2 + (thumb_tip.y - index_tip.y)**2) ** 0.5
+    @staticmethod
+    def distance(a, b):
+        return ((a.x - b.x)**2 + (a.y - b.y)**2) ** 0.5
+
+    def is_pinch(self, hand_results, threshold):
+        distances = []
+        for landmarks in hand_results:
+            thumb_tip = landmarks[4]
+            index_tip = landmarks[8]
+            distances.append(self.distance(thumb_tip, index_tip))
+
+        distance = min(distances)
         return distance <= threshold
 
     def update(self, landmarks, threshold=0.05):
