@@ -1,5 +1,7 @@
 import cv2
 import numpy as np
+import random
+import time
 
 def filter_1(image_rgb: np.ndarray):
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_RGB2GRAY)
@@ -41,8 +43,7 @@ def filter_3(image_rgb: np.ndarray):
 
 def filter_4(image_rgb: np.ndarray):
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2GRAY)
-    image_rgb = cv2.applyColorMap(gray, cv2.COLORMAP_JET)
-    return image_rgb
+    return cv2.applyColorMap(gray, cv2.COLORMAP_JET)
 
 def filter_5(image_rgb: np.ndarray):
     h, w = image_rgb.shape[:2]
@@ -65,14 +66,11 @@ def filter_5(image_rgb: np.ndarray):
 
     out = (sepia * vignette).astype(np.uint8)
     noise = np.random.randint(0, 25, out.shape, dtype=np.uint8)
-    image_rgb = cv2.add(out, noise)
-
-    return image_rgb
+    return cv2.add(out, noise)
 
 def filter_6(image_rgb: np.ndarray):
     blurred = cv2.GaussianBlur(image_rgb, (35, 35), 0)
-    image_rgb = cv2.addWeighted(blurred, 0.55, image_rgb, 0.45, 0.3)
-    return image_rgb
+    return cv2.addWeighted(blurred, 0.55, image_rgb, 0.45, 0.3)
 
 def filter_7(image_rgb: np.ndarray):
     gray = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2GRAY)
@@ -87,9 +85,73 @@ def filter_7(image_rgb: np.ndarray):
     radius = (1 - gray / 255.0) * (cell / 1.3)
     dot_mask = dist_center < radius
 
-    out = np.full_like(image_rgb, (215, 190, 245))
-    out[dot_mask] = (55, 20, 130)
+    image_rgb[dot_mask] = (55, 20, 130)
+    return image_rgb
+
+def filter_8(image_rgb: np.ndarray):
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2GRAY)
+    _, mask = cv2.threshold(gray, 110, 255, cv2.THRESH_BINARY)
+
+    image_rgb[mask == 255] = (10, 140, 255)
+    image_rgb[mask == 0] = (180, 30, 220)
+    return image_rgb
+
+def filter_9(image_rgb: np.ndarray):
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2GRAY)
+    gray_blur = cv2.medianBlur(gray, 5)
+    edges = cv2.adaptiveThreshold(gray_blur, 255, cv2.ADAPTIVE_THRESH_MEAN_C, cv2.THRESH_BINARY, 9, 9)
+    color = cv2.bilateralFilter(image_rgb, 9, 250, 250)
+    return cv2.bitwise_and(color, cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR))
+
+def filter_10(image_rgb: np.ndarray):
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2GRAY)
+    inv = 255 - gray
+    blur = cv2.GaussianBlur(inv, (21, 21), 0)
+    sketch = cv2.divide(gray, 255 - blur, scale=256)
+    return cv2.cvtColor(sketch, cv2.COLOR_GRAY2BGR)
+
+def filter_11(image_rgb: np.ndarray, block_size: int = 14):
+    h, w = image_rgb.shape[:2]
+    if h < 2 or w < 2:
+        return image_rgb
+    small = cv2.resize(image_rgb, (max(1, w // block_size), max(1, h // block_size)), interpolation=cv2.INTER_LINEAR)
+    return cv2.resize(small, (w, h), interpolation=cv2.INTER_NEAREST)
+
+def filter_12(image_rgb: np.ndarray):
+    h, w = image_rgb.shape[:2]
+    if h < 2 or w < 2:
+        return image_rgb
+    b, g, r = cv2.split(image_rgb)
+    shift = random.randint(4, 12)
+    r = np.roll(r, shift, axis=1)
+    b = np.roll(b, -shift, axis=1)
+    out = cv2.merge([b, g, r])
+    for _ in range(2):
+        y = random.randint(0, h - 1)
+        out[y : y + 1, :] = np.random.randint(0, 255, (1, w, 3), dtype=np.uint8)
     return out
+
+def filter_13(image_rgb: np.ndarray):
+    return 255 - image_rgb
+
+def filter_14(image_rgb: np.ndarray):
+    b, _, r = cv2.split(image_rgb)
+    zeros = np.zeros_like(b)
+    return cv2.merge([zeros, zeros, r])
+
+def filter_15(image_rgb: np.ndarray):
+    gray = cv2.cvtColor(image_rgb, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 60, 150)
+    colored = cv2.applyColorMap(edges, cv2.COLORMAP_SUMMER)
+    return cv2.bitwise_and(colored, colored, mask=edges)
+
+def filter_16(image_rgb: np.ndarray):
+    h, w = image_rgb.shape[:2]
+    t = time.time() * 5.0
+    x_coords, y_coords = np.meshgrid(np.arange(w), np.arange(h))
+    pattern = np.sin((x_coords + y_coords) * 0.05 + t) * 127 + 128
+    rainbow = cv2.applyColorMap(pattern.astype(np.uint8), cv2.COLORMAP_HSV)
+    return cv2.addWeighted(image_rgb, 0.3, rainbow, 0.7, 0)
 
 FILTERS = [
     filter_1,
@@ -98,5 +160,14 @@ FILTERS = [
     filter_4,
     filter_5,
     filter_6,
-    filter_7
+    filter_7,
+    filter_8,
+    filter_9,
+    filter_10,
+    filter_11,
+    filter_12,
+    filter_13,
+    filter_14,
+    filter_15,
+    filter_16,
 ]
