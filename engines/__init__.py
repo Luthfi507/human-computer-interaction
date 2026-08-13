@@ -1,5 +1,6 @@
-from .effects import Pipeline
+from .effects import PolyPipeline, RectanglePipeline
 
 __all__ = [
-    "Pipeline"
+    "PolyPipeline",
+    "RectanglePipeline"
 ]

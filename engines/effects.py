@@ -5,8 +5,17 @@ from tools import FILTERS, HandController
 from utils import draw_hand_landmarks
 hand_controller = HandController()
 
+def landmark_to_pixel(landmark, frame_shape):
+    h, w = frame_shape[:2]
+    return (int(landmark.x * w), int(landmark.y * h))
+
 class Pinch:
-    def __init__(self, threshold = 0.05):
+    def __init__(
+            self, 
+            draw_landmarks=False,
+            threshold = 0.05
+        ):
+        self.draw_landmarks = draw_landmarks
         self.threshold = threshold
         self.current_filter = 0
         
@@ -18,22 +27,68 @@ class Pinch:
                 self.current_filter + 1
             ) % len(FILTERS)
 
-class Pipeline(Pinch):
+class RectanglePipeline(Pinch):
+    def __init__(self, draw_landmarks=False, threshold=0.05):
+        super().__init__(draw_landmarks, threshold)
+
+    def get_points(self, frame, hand_results):
+        frame_shape = frame.shape
+
+        left_hand = None
+        right_hand = None
+
+        for landmarks, handedness in zip(
+            hand_results.hand_landmarks, hand_results.handedness
+        ):
+            if self.draw_landmarks:
+                draw_hand_landmarks(frame, landmarks)
+            hand_name = handedness[0].category_name
+
+            if hand_name == "Left":
+                left_hand = landmarks
+            elif hand_name == "Right":
+                right_hand = landmarks
+
+        if left_hand is None or right_hand is None:
+            return
+
+        left_index = landmark_to_pixel(left_hand[8], frame_shape)
+        right_index = landmark_to_pixel(right_hand[8], frame_shape)
+
+        x1 = min(left_index[0], right_index[0])
+        y1 = min(left_index[1], right_index[1])
+        x2 = max(left_index[0], right_index[0])
+        y2 = max(left_index[1], right_index[1])
+        return x1, y1, x2, y2
+
+    def process(self, frame: np.ndarray, hand_results):
+        if len(hand_results.hand_landmarks) < 2:
+            return frame
+        
+        points = self.get_points(frame, hand_results)
+
+        if not points:
+            return frame
+
+        x1, y1, x2, y2 = points
+        self.update_filter(hand_results.hand_landmarks)
+
+        roi = frame[y1:y2, x1:x2]
+        filtered_roi = FILTERS[self.current_filter](roi)
+        frame[y1:y2, x1:x2] = filtered_roi
+
+        return frame
+
+class PolyPipeline(Pinch):
     def __init__(
             self,
             draw_landmarks=False,
             threshold=0.05,
             smoothing=0.5
         ):
-        super().__init__(threshold)
-        self.draw_landmarks = draw_landmarks
+        super().__init__(draw_landmarks, threshold)
         self.smoothing = smoothing
         self.prev_points = None
-
-    @staticmethod
-    def landmark_to_pixel(landmark, frame_shape):
-        h, w = frame_shape[:2]
-        return (int(landmark.x * w), int(landmark.y * h))
 
     def smooth_points(self, points):
         if self.prev_points is None:
@@ -84,10 +139,10 @@ class Pipeline(Pinch):
             self.prev_points = None
             return
 
-        left_thumb = self.landmark_to_pixel(left_hand[4], frame_shape)
-        left_index = self.landmark_to_pixel(left_hand[8], frame_shape)
-        right_thumb = self.landmark_to_pixel(right_hand[4], frame_shape)
-        right_index = self.landmark_to_pixel(right_hand[8], frame_shape)
+        left_thumb = landmark_to_pixel(left_hand[4], frame_shape)
+        left_index = landmark_to_pixel(left_hand[8], frame_shape)
+        right_thumb = landmark_to_pixel(right_hand[4], frame_shape)
+        right_index = landmark_to_pixel(right_hand[8], frame_shape)
 
         points = np.array([
             left_thumb, left_index, right_index, right_thumb
@@ -96,7 +151,7 @@ class Pipeline(Pinch):
         points = self.smooth_points(points)
         return np.round(points).astype(np.int32)
 
-    def polly_process(self, frame: np.ndarray, hand_results):
+    def process(self, frame: np.ndarray, hand_results):
         points = self.get_poly_point(hand_results, frame)
         if points is None:
             return frame

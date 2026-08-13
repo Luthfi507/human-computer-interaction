@@ -1,10 +1,11 @@
 import cv2
 import mediapipe as mp
 
-from engines import Pipeline
+from engines import PolyPipeline, RectanglePipeline
 from utils import HAND_DETECTOR
 
-effect = Pipeline()
+poly_effect = PolyPipeline()
+rectangle_effect = RectanglePipeline(True)
 
 def main():
     cap = cv2.VideoCapture(0)
@@ -21,9 +22,13 @@ def main():
         mp_image = mp.Image(mp.ImageFormat.SRGB, rgb)
         hand_results = HAND_DETECTOR.detect(mp_image)
 
-        frame = effect.polly_process(frame, hand_results)
+        frame = poly_effect.process(frame, hand_results)
+        # frame = rectangle_effect.process(frame, hand_results)
 
-        cv2.imshow("", frame)
+        cv2.imshow(
+            "Camera",
+            cv2.resize(frame, None, fx=2, fy=2)
+        )
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
 
