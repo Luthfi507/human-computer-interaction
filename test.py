@@ -2,15 +2,19 @@ import cv2
 import numpy as np
 import mediapipe as mp
 from mediapipe.tasks.python.vision import (
-    FaceDetectorOptions, FaceDetector
+    FaceDetectorOptions, FaceDetector,
+    FaceLandmarkerOptions, FaceLandmarker
 )
 
-from tools.filters import FILTERS
-from utils.hand_tracking import HandController, HAND_DETECTOR, draw_hand_landmarks
+from tools import FILTERS, HandController
+from utils import HAND_DETECTOR, draw_hand_landmarks
 
 hand_controller = HandController()
 opt = FaceDetectorOptions(base_options=mp.tasks.BaseOptions(model_asset_path="models/blaze_face_full_range.tflite"))
 detector = FaceDetector.create_from_options(opt)
+
+face_opt = FaceLandmarkerOptions(base_options=mp.tasks.BaseOptions(model_asset_path="models/face_landmarker.task"))
+face_landmarker = FaceLandmarker.create_from_options(face_opt)
 
 def process_face(frame, face_results, current_filter):
     for result in face_results.detections:
@@ -23,6 +27,38 @@ def process_face(frame, face_results, current_filter):
         roi = frame[y1:y2, x1:x2]
         frame[y1:y2, x1:x2] = FILTERS[current_filter](roi)
 
+    return frame
+
+def process_face_landmarks(frame, face_landmarks, current_filter):
+    frame_h, frame_w = frame.shape[:2]
+    points = np.array([
+        (int(lm.x * frame_w), int(lm.y * frame_h))
+        for lm in face_landmarks
+    ], np.int32)
+
+    hull = cv2.convexHull(points)
+    x, y, bw, bh = cv2.boundingRect(hull)
+
+    # guard against empty / out-of-bounds regions
+    if bw == 0 or bh == 0:
+        return frame
+
+    roi = frame[y:y+bh, x:x+bw]
+    if roi.size == 0:
+        return frame
+
+    filtered = FILTERS[current_filter](roi)
+
+    local_hull = hull - np.array([x, y])
+    
+    mask = np.zeros((bh, bw), np.uint8)
+    cv2.fillConvexPoly(mask, local_hull, 255)
+
+    # ensure mask shape matches roi/filter shapes
+    if mask.shape[:2] != roi.shape[:2] or mask.shape[:2] != filtered.shape[:2]:
+        mask = cv2.resize(mask, (roi.shape[1], roi.shape[0]), interpolation=cv2.INTER_NEAREST)
+
+    roi[mask == 255] = filtered[mask == 255]
     return frame
 
 def process_pinch(frame, hand_results):
@@ -80,7 +116,7 @@ def main():
         frame = cv2.flip(frame, 1)
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(mp.ImageFormat.SRGB, rgb)
-        face_results = detector.detect(mp_image)
+        face_results = face_landmarker.detect(mp_image)
         hand_results = HAND_DETECTOR.detect(mp_image)
 
         pinching = process_pinch(frame, hand_results)
@@ -91,6 +127,8 @@ def main():
 
         # frame = process_face(frame, face_results, current_filter - 1)
         frame = process_polygon(frame, hand_results, current_filter)
+        # for face_landmarks in face_results.face_landmarks:
+        #     frame = process_face_landmarks(frame, face_landmarks, current_filter)
 
         cv2.imshow("", frame)
         if cv2.waitKey(1) & 0xFF == ord("q"):
