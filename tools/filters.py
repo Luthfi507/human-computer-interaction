@@ -176,3 +176,43 @@ def filter_16(image_rgb: np.ndarray):
     pattern = np.sin((x_coords + y_coords) * 0.05 + t) * 127 + 128
     rainbow = cv2.applyColorMap(pattern.astype(np.uint8), cv2.COLORMAP_HSV)
     return cv2.addWeighted(image_rgb, 0.3, rainbow, 0.7, 0)
+
+@register_filter
+def filter_17(image: np.ndarray):
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    neon = np.zeros_like(image)
+
+    edges = cv2.Canny(gray, 80, 150)
+    edges = cv2.GaussianBlur(edges, (5, 5), 0)
+
+    neon[:, :, 0] = edges
+    neon[:, :, 1] = edges
+    return cv2.addWeighted(image,0.3,neon,1.0,0)
+
+@register_filter
+def filter_18(image: np.ndarray):
+    levels = 6
+    step = 256 // levels
+
+    result = (image // step) * step
+    return result.astype(np.uint8)
+
+@register_filter
+def filter_19(image: np.ndarray):
+    gray = cv2.cvtColor(image,cv2.COLOR_BGR2GRAY)
+    result = np.zeros_like(image)
+
+    result[:, :, 0] = gray
+    result[:, :, 2] = 255 - gray
+    return result
+
+@register_filter
+def filter_20(image: np.ndarray):
+    kernel = np.array([
+        [-2, -1, 0],
+        [-1,  1, 1],
+        [ 0,  1, 2]
+    ])
+
+    embossed = cv2.filter2D(image, -1, kernel)
+    return embossed

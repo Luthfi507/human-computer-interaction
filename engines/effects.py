@@ -21,7 +21,7 @@ class Pinch:
         self.current_filter = 0
         
     def update_filter(self, hand_landmarks):
-        if len(hand_landmarks) < 2:
+        if len(hand_landmarks) < 1:
             return
         
         pinching = hand_controller.update(hand_landmarks)
