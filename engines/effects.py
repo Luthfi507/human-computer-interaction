@@ -25,7 +25,10 @@ class Pinch:
         self.current_filter = 0
         
     def update_filter(self, hand_landmarks):
-        pinching = hand_controller.update(hand_landmarks)
+        if len(hand_landmarks) < 2:
+            return
+        
+        pinching = hand_controller.update(hand_landmarks[:1])
 
         if pinching:
             self.current_filter = (
@@ -80,6 +83,9 @@ class RectanglePipeline(Pinch):
         self.update_filter(hand_results.hand_landmarks)
 
         roi = frame[y1:y2, x1:x2]
+        if roi.size  == 0:
+            return frame
+
         filtered_roi = FILTERS[self.current_filter](roi)
         frame[y1:y2, x1:x2] = filtered_roi
 
@@ -358,6 +364,9 @@ class SpotlightPipeline(Pinch):
         y2 = min(frame_h, cy + radius)
 
         roi = frame[y1:y2, x1:x2]
+        if roi.size  == 0:
+            return frame
+
         filtered_roi = FILTERS[self.current_filter](roi.copy())
 
         local_center = (cx - x1, cy - y1)
@@ -365,4 +374,18 @@ class SpotlightPipeline(Pinch):
 
         cv2.circle(mask, local_center, radius, 255, -1)
         roi[mask > 0] = filtered_roi[mask > 0]
+        return frame
+
+class SelfieSegmentation(Pinch):
+    def __init__(self, draw_landmarks=False, threshold=0.05):
+        super().__init__(draw_landmarks, threshold)
+
+    def process(self, frame, results, hand_results):
+        self.update_filter(hand_results.hand_landmarks)        
+        mask = results.category_mask.numpy_view().squeeze()
+        person_mask = mask > 0
+
+        filtered_frame = FILTERS[self.current_filter](frame.copy())
+        frame[person_mask] = filtered_frame[person_mask]
+
         return frame

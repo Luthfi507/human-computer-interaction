@@ -1,13 +1,13 @@
 import cv2
 import mediapipe as mp
 
-from engines import MODES
-from utils import HAND_DETECTOR
+from engines import SelfieSegmentation
+from utils import HAND_DETECTOR, SEGMENTER
 
 draw = True
+processor = SelfieSegmentation(draw)
 
 def main():
-    processor = MODES[2](draw)
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         raise RuntimeError("No camera detected")
@@ -21,9 +21,9 @@ def main():
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
         mp_image = mp.Image(mp.ImageFormat.SRGB, rgb)
         hand_results = HAND_DETECTOR.detect(mp_image)
+        seg_results = SEGMENTER.segment(mp_image)
 
-        frame = processor.process(frame, hand_results)
-        print(processor.current_filter)
+        frame = processor.process(frame, seg_results, hand_results)
 
         cv2.imshow(
             "Camera",

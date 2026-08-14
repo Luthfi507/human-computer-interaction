@@ -1,5 +1,7 @@
-from .effects import MODES
+from .effects import MODES, Pinch, SelfieSegmentation
 
 __all__ = [
-    "MODES"
+    "MODES",
+    "Pinch",
+    "SelfieSegmentation"
 ]
