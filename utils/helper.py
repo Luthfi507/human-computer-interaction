@@ -13,4 +13,8 @@ def get_model(url):
         urlretrieve(url, path)
         print(f"{filename} downloaded")
     
-    return path  
+    return path
+
+def landmark_to_pixel(landmark, frame):
+    h, w = frame.shape[:2]
+    return (int(landmark.x * w), int(landmark.y * h))

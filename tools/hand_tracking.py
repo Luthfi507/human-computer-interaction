@@ -1,5 +1,6 @@
 import numpy as np
 from time import time
+from utils import landmark_to_pixel
 
 class HandController:
     def __init__(self, max_durations=1.0):
@@ -42,12 +43,7 @@ class HandController:
 
         self.was_pinching = is_pinching
         return triggered
-
-    @staticmethod
-    def landmark_to_pixel(landmark, frame_shape):
-        h, w = frame_shape[:2]
-        return (int(landmark.x * w), int(landmark.y * h))
-
+    
     def get_poly_point(self, results, frame_shape):
         if len(results.hand_landmarks) < 2:
             return
@@ -68,10 +64,10 @@ class HandController:
         if left_hand is None or right_hand is None:
             return
 
-        left_thumb = self.landmark_to_pixel(left_hand[4], frame_shape)
-        left_index = self.landmark_to_pixel(left_hand[8], frame_shape)
-        right_thumb = self.landmark_to_pixel(right_hand[4], frame_shape)
-        right_index = self.landmark_to_pixel(right_hand[8], frame_shape)
+        left_thumb = landmark_to_pixel(left_hand[4], frame_shape)
+        left_index = landmark_to_pixel(left_hand[8], frame_shape)
+        right_thumb = landmark_to_pixel(right_hand[4], frame_shape)
+        right_index = landmark_to_pixel(right_hand[8], frame_shape)
 
         points = np.array([
             left_thumb, left_index, right_index, right_thumb

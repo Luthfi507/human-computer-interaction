@@ -2,17 +2,13 @@ import cv2
 import numpy as np
 
 from tools import FILTERS, HandController
-from utils import draw_hand_landmarks
+from utils import draw_hand_landmarks, landmark_to_pixel
 hand_controller = HandController()
 
 MODES = []
 def register_mode(func):
     MODES.append(func)
     return func
-
-def landmark_to_pixel(landmark, frame_shape):
-    h, w = frame_shape[:2]
-    return (int(landmark.x * w), int(landmark.y * h))
 
 class Pinch:
     def __init__(
@@ -28,7 +24,7 @@ class Pinch:
         if len(hand_landmarks) < 2:
             return
         
-        pinching = hand_controller.update(hand_landmarks[:1])
+        pinching = hand_controller.update(hand_landmarks)
 
         if pinching:
             self.current_filter = (
@@ -381,6 +377,10 @@ class SelfieSegmentation(Pinch):
         super().__init__(draw_landmarks, threshold)
 
     def process(self, frame, results, hand_results):
+        if self.draw_landmarks:
+            for landmarks in hand_results.hand_landmarks:
+                draw_hand_landmarks(frame, landmarks)
+
         self.update_filter(hand_results.hand_landmarks)        
         mask = results.category_mask.numpy_view().squeeze()
         person_mask = mask > 0
