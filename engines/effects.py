@@ -5,6 +5,11 @@ from tools import FILTERS, HandController
 from utils import draw_hand_landmarks
 hand_controller = HandController()
 
+MODES = []
+def register_mode(func):
+    MODES.append(func)
+    return func
+
 def landmark_to_pixel(landmark, frame_shape):
     h, w = frame_shape[:2]
     return (int(landmark.x * w), int(landmark.y * h))
@@ -27,6 +32,7 @@ class Pinch:
                 self.current_filter + 1
             ) % len(FILTERS)
 
+@register_mode
 class RectanglePipeline(Pinch):
     def __init__(self, draw_landmarks=False, threshold=0.05):
         super().__init__(draw_landmarks, threshold)
@@ -79,6 +85,7 @@ class RectanglePipeline(Pinch):
 
         return frame
 
+@register_mode
 class PolyPipeline(Pinch):
     def __init__(
             self,
@@ -168,5 +175,111 @@ class PolyPipeline(Pinch):
         cv2.fillPoly(mask, [local_points], 255)
         roi[mask > 0] = filtered_roi[mask > 0]
         frame[y:y+h, x:x+w] = roi
+
+        return frame
+
+@register_mode
+class CirclePipeline(Pinch):
+    def __init__(self, draw_landmarks=False, threshold=0.05, smoothing=0.5):
+        super().__init__(draw_landmarks, threshold)
+        self.smoothing = smoothing
+        self.prev_radius = None
+        self.prev_center = None
+
+    def smooth_circle(self, center, radius):
+        center = np.array(
+            center, np.float32
+        )
+
+        if self.prev_center is None:
+            self.prev_center = center.copy()
+            self.prev_radius = radius
+
+        center = self.smoothing * center + (1 - self.smoothing) * self.prev_center
+        radius = self.smoothing * radius + (1 - self.smoothing) * self.prev_radius
+
+        self.prev_center = center.copy()
+        self.prev_radius = radius
+
+        return center, radius
+
+    def get_circle(self, results, frame):
+        if len(results.hand_landmarks) < 2:
+            self.prev_radius = None
+            self.prev_center = None
+            return
+
+        frame_shape = frame.shape
+
+        left_hand = None
+        right_hand = None
+
+        for landmarks, handedness in zip(
+            results.hand_landmarks,
+            results.handedness
+        ):
+            if self.draw_landmarks:
+                draw_hand_landmarks(frame, landmarks)
+
+            hand_name = handedness[0].category_name
+
+            if hand_name == "Left":
+                left_hand = landmarks
+
+            elif hand_name == "Right":
+                right_hand = landmarks
+
+        if left_hand is None or right_hand is None:
+            self.prev_center = None
+            self.prev_radius = None
+            return
+
+        left_index = landmark_to_pixel(left_hand[8], frame_shape)
+        right_index = landmark_to_pixel(right_hand[8], frame_shape)
+
+        left_index = np.array(left_index, dtype=np.float32)
+        right_index = np.array(right_index, dtype=np.float32)
+
+        center = (left_index + right_index) / 2
+        radius = np.linalg.norm(left_index - right_index) / 2
+
+        center, radius = self.smooth_circle(center, radius)
+
+        center = tuple(np.round(center).astype(np.int32))
+        radius = int(round(radius))
+
+        return center, radius
+
+    def process(self, frame: np.ndarray, hand_results):
+        circle = self.get_circle(hand_results, frame)
+
+        if circle is None:
+            return frame
+
+        center, radius = circle
+
+        if radius <= 1:
+            return frame
+
+        self.update_filter(hand_results.hand_landmarks)
+
+        cx, cy = center
+        frame_h, frame_w = frame.shape[:2]
+
+        x1 = max(0, cx - radius)
+        y1 = max(0, cy - radius)
+
+        x2 = min(frame_w, cx + radius)
+        y2 = min(frame_h, cy + radius)
+
+        roi = frame[y1:y2,x1:x2]
+
+        filtered_roi = FILTERS[self.current_filter](roi.copy())
+
+        local_center = (cx - x1,cy - y1)
+        mask = np.zeros(roi.shape[:2], dtype=np.uint8)
+
+        cv2.circle(mask, local_center, radius, 255, -1)
+        roi[mask > 0] = filtered_roi[mask > 0]
 
         return frame

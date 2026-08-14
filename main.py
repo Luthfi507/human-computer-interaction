@@ -1,13 +1,13 @@
 import cv2
 import mediapipe as mp
 
-from engines import PolyPipeline, RectanglePipeline
+from engines import MODES
 from utils import HAND_DETECTOR
 
-poly_effect = PolyPipeline()
-rectangle_effect = RectanglePipeline(True)
+draw = True
 
 def main():
+    processor = MODES[2](draw)
     cap = cv2.VideoCapture(0)
     if not cap.isOpened():
         raise RuntimeError("No camera detected")
@@ -22,12 +22,13 @@ def main():
         mp_image = mp.Image(mp.ImageFormat.SRGB, rgb)
         hand_results = HAND_DETECTOR.detect(mp_image)
 
-        frame = poly_effect.process(frame, hand_results)
-        # frame = rectangle_effect.process(frame, hand_results)
+        frame = processor.process(frame, hand_results)
+        print(processor.current_filter)
 
         cv2.imshow(
             "Camera",
-            cv2.resize(frame, None, fx=2, fy=2)
+            # cv2.resize(frame, None, fx=2, fy=2)
+            frame
         )
         if cv2.waitKey(1) & 0xFF == ord("q"):
             break
