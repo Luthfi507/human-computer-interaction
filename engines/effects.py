@@ -283,3 +283,86 @@ class CirclePipeline(Pinch):
         roi[mask > 0] = filtered_roi[mask > 0]
 
         return frame
+
+@register_mode
+class SpotlightPipeline(Pinch):
+    def __init__(self, draw_landmarks=False, threshold=0.05, smoothing=0.5):
+        super().__init__(draw_landmarks, threshold)
+        self.smoothing = smoothing
+        self.prev_center = None
+        self.prev_radius = None
+
+    def smooth_spotlight(self, center, radius):
+        center = np.array(center, dtype=np.float32)
+
+        if self.prev_center is None:
+            self.prev_center = center.copy()
+            self.prev_radius = radius
+            return center, radius
+
+        center = self.smoothing * center+ (1.0 - self.smoothing) * self.prev_center
+        radius = self.smoothing * radius+ (1.0 - self.smoothing) * self.prev_radius
+
+        self.prev_center = center.copy()
+        self.prev_radius = radius
+        return center, radius
+
+    def get_spotlight(self, results, frame):
+        if len(results.hand_landmarks) == 0:
+            self.prev_center = None
+            self.prev_radius = None
+            return
+
+        frame_shape = frame.shape
+        landmarks = results.hand_landmarks[0]
+
+        if self.draw_landmarks:
+            draw_hand_landmarks(frame, landmarks)
+
+        index_tip = landmark_to_pixel(landmarks[8], frame_shape)
+        thumb_tip = landmark_to_pixel(landmarks[4], frame_shape)
+
+        index_tip = np.array(index_tip, dtype=np.float32)
+        thumb_tip = np.array(thumb_tip, dtype=np.float32)
+
+        center = index_tip
+        radius = np.linalg.norm(thumb_tip - index_tip)
+
+        center, radius = self.smooth_spotlight(center, radius)
+
+        center = tuple(np.round(center).astype(np.int32))
+        radius = int(round(radius))
+        return center, radius
+
+    def process(self, frame: np.ndarray, hand_results):
+        spotlight = self.get_spotlight(hand_results,frame)
+
+        if spotlight is None:
+            return frame
+
+        center, radius = spotlight
+
+        if radius <= 1:
+            return frame
+
+        self.update_filter(hand_results.hand_landmarks)
+
+        cx, cy = center
+
+        frame_h, frame_w = frame.shape[:2]
+
+        x1 = max(0, cx - radius)
+        y1 = max(0, cy - radius)
+
+        x2 = min(frame_w, cx + radius)
+        y2 = min(frame_h, cy + radius)
+
+        roi = frame[y1:y2, x1:x2]
+        filtered_roi = FILTERS[self.current_filter](roi.copy())
+
+        local_center = (cx - x1, cy - y1)
+        mask = np.zeros(roi.shape[:2], dtype=np.uint8)
+
+        cv2.circle(mask, local_center, radius, 255, -1)
+        roi[mask > 0] = filtered_roi[mask > 0]
+        return frame
