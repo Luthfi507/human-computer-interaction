@@ -5,11 +5,6 @@ from tools import FILTERS, HandController
 from utils import draw_hand_landmarks, landmark_to_pixel
 hand_controller = HandController()
 
-MODES = []
-def register_mode(func):
-    MODES.append(func)
-    return func
-
 class Pinch:
     def __init__(
             self, 
@@ -31,14 +26,12 @@ class Pinch:
                 self.current_filter + 1
             ) % len(FILTERS)
 
-@register_mode
 class RectanglePipeline(Pinch):
     def __init__(self, draw_landmarks=False, threshold=0.05):
         super().__init__(draw_landmarks, threshold)
+        self.committed_regions = []
 
     def get_points(self, frame, hand_results):
-        frame_shape = frame.shape
-
         left_hand = None
         right_hand = None
 
@@ -57,8 +50,8 @@ class RectanglePipeline(Pinch):
         if left_hand is None or right_hand is None:
             return
 
-        left_index = landmark_to_pixel(left_hand[8], frame_shape)
-        right_index = landmark_to_pixel(right_hand[8], frame_shape)
+        left_index = landmark_to_pixel(left_hand[8], frame)
+        right_index = landmark_to_pixel(right_hand[8], frame)
 
         x1 = min(left_index[0], right_index[0])
         y1 = min(left_index[1], right_index[1])
@@ -66,7 +59,24 @@ class RectanglePipeline(Pinch):
         y2 = max(left_index[1], right_index[1])
         return x1, y1, x2, y2
 
+    def filter_region(self, frame, points, filter_idx):
+        x1, y1, x2, y2 = points
+        roi = frame[y1:y2, x1:x2]
+
+        if roi.size == 0:
+            return
+
+        filtered_roi = FILTERS[filter_idx](roi)
+        frame[y1:y2, x1:x2] = filtered_roi
+
     def process(self, frame: np.ndarray, hand_results):
+        for region in self.committed_regions:
+            self.filter_region(
+                frame,
+                region["points"],
+                region["filter"]
+            )
+
         if len(hand_results.hand_landmarks) < 2:
             return frame
         
@@ -75,19 +85,23 @@ class RectanglePipeline(Pinch):
         if not points:
             return frame
 
-        x1, y1, x2, y2 = points
+        previous_filter = self.current_filter
         self.update_filter(hand_results.hand_landmarks)
 
-        roi = frame[y1:y2, x1:x2]
-        if roi.size  == 0:
-            return frame
+        if self.current_filter != previous_filter:
+            self.committed_regions.append({
+                "points": points,
+                "filter": previous_filter
+            })
 
-        filtered_roi = FILTERS[self.current_filter](roi)
-        frame[y1:y2, x1:x2] = filtered_roi
+        self.filter_region(
+            frame,
+            points,
+            self.current_filter
+        )
 
         return frame
 
-@register_mode
 class PolyPipeline(Pinch):
     def __init__(
             self,
@@ -124,7 +138,6 @@ class PolyPipeline(Pinch):
         return points[order]
 
     def get_poly_point(self, results, frame):
-        frame_shape = frame.shape
         if len(results.hand_landmarks) < 2:
             self.prev_points = None
             return
@@ -148,10 +161,10 @@ class PolyPipeline(Pinch):
             self.prev_points = None
             return
 
-        left_thumb = landmark_to_pixel(left_hand[4], frame_shape)
-        left_index = landmark_to_pixel(left_hand[8], frame_shape)
-        right_thumb = landmark_to_pixel(right_hand[4], frame_shape)
-        right_index = landmark_to_pixel(right_hand[8], frame_shape)
+        left_thumb = landmark_to_pixel(frame, left_hand[4])
+        left_index = landmark_to_pixel(frame, left_hand[8])
+        right_thumb = landmark_to_pixel(frame, right_hand[4])
+        right_index = landmark_to_pixel(frame, right_hand[8])
 
         points = np.array([
             left_thumb, left_index, right_index, right_thumb
@@ -180,7 +193,6 @@ class PolyPipeline(Pinch):
 
         return frame
 
-@register_mode
 class CirclePipeline(Pinch):
     def __init__(self, draw_landmarks=False, threshold=0.05, smoothing=0.5):
         super().__init__(draw_landmarks, threshold)
@@ -211,7 +223,6 @@ class CirclePipeline(Pinch):
             self.prev_center = None
             return
 
-        frame_shape = frame.shape
 
         left_hand = None
         right_hand = None
@@ -236,8 +247,8 @@ class CirclePipeline(Pinch):
             self.prev_radius = None
             return
 
-        left_index = landmark_to_pixel(left_hand[8], frame_shape)
-        right_index = landmark_to_pixel(right_hand[8], frame_shape)
+        left_index = landmark_to_pixel(frame, left_hand[8])
+        right_index = landmark_to_pixel(frame, right_hand[8])
 
         left_index = np.array(left_index, dtype=np.float32)
         right_index = np.array(right_index, dtype=np.float32)
@@ -286,7 +297,6 @@ class CirclePipeline(Pinch):
 
         return frame
 
-@register_mode
 class SpotlightPipeline(Pinch):
     def __init__(self, draw_landmarks=False, threshold=0.05, smoothing=0.5):
         super().__init__(draw_landmarks, threshold)
@@ -315,14 +325,13 @@ class SpotlightPipeline(Pinch):
             self.prev_radius = None
             return
 
-        frame_shape = frame.shape
         landmarks = results.hand_landmarks[0]
 
         if self.draw_landmarks:
             draw_hand_landmarks(frame, landmarks)
 
-        index_tip = landmark_to_pixel(landmarks[8], frame_shape)
-        thumb_tip = landmark_to_pixel(landmarks[4], frame_shape)
+        index_tip = landmark_to_pixel(frame, landmarks[8])
+        thumb_tip = landmark_to_pixel(frame, landmarks[4])
 
         index_tip = np.array(index_tip, dtype=np.float32)
         thumb_tip = np.array(thumb_tip, dtype=np.float32)

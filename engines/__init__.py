@@ -1,7 +1,17 @@
-from .effects import MODES, Pinch, SelfieSegmentation
+from .effects import (
+    Pinch,
+    RectanglePipeline,
+    PolyPipeline,
+    CirclePipeline,
+    SpotlightPipeline,
+    SelfieSegmentation
+)
 
 __all__ = [
-    "MODES",
-    "Pinch",
-    "SelfieSegmentation"
+    Pinch,
+    RectanglePipeline,
+    PolyPipeline,
+    CirclePipeline,
+    SpotlightPipeline,
+    SelfieSegmentation
 ]
