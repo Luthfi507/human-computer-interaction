@@ -20,8 +20,7 @@ class Pinch:
         if len(hand_landmarks) < 1:
             return
         
-        pinching = hand_controller.update(hand_landmarks)
-
+        pinching = hand_controller.update(hand_landmarks, self.threshold)
         if pinching:
             self.current_filter = random.choice(FILTERS)
 
@@ -275,14 +274,7 @@ class SpotlightPipeline(Pinch):
         self.prev_radius = radius
         return center, radius
 
-    def get_spotlight(self, results, frame):
-        if len(results.hand_landmarks) == 0:
-            self.prev_center = None
-            self.prev_radius = None
-            return
-
-        landmarks = results.hand_landmarks[0]
-
+    def get_spotlight(self, landmarks, frame):
         if self.draw_landmarks:
             draw_hand_landmarks(frame, landmarks)
 
@@ -303,8 +295,12 @@ class SpotlightPipeline(Pinch):
 
     def process(self, frame: np.ndarray, **kwargs):
         hand_results = kwargs['hand_results']
-        spotlight = self.get_spotlight(hand_results,frame)
+        if len(hand_results.hand_landmarks) == 0:
+            self.prev_center = None
+            self.prev_radius = None
+            return frame
 
+        spotlight = self.get_spotlight(hand_results.hand_landmarks[0], frame)
         if spotlight is None:
             return frame
 
@@ -314,6 +310,70 @@ class SpotlightPipeline(Pinch):
             return frame
 
         self.update_filter(hand_results.hand_landmarks)
+
+        cx, cy = center
+
+        frame_h, frame_w = frame.shape[:2]
+
+        x1 = max(0, cx - radius)
+        y1 = max(0, cy - radius)
+
+        x2 = min(frame_w, cx + radius)
+        y2 = min(frame_h, cy + radius)
+
+        roi = frame[y1:y2, x1:x2]
+        if roi.size  == 0:
+            return frame
+
+        filtered_roi = self.current_filter(roi.copy())
+
+        local_center = (cx - x1, cy - y1)
+        mask = np.zeros(roi.shape[:2], dtype=np.uint8)
+
+        cv2.circle(mask, local_center, radius, 255, -1)
+        roi[mask > 0] = filtered_roi[mask > 0]
+        return frame
+
+class SpotlightBackground(SpotlightPipeline):
+    def __init__(self, draw_landmarks=False, threshold=0.05):
+        super().__init__(draw_landmarks, threshold)
+        self.background_filter = None
+
+    def update_background(self, landmarks):
+        is_pinching = hand_controller.update([landmarks], self.threshold)
+        if is_pinching:
+            self.background_filter = random.choice(FILTERS)
+
+    def process(self, frame, **kwargs):
+        hand_results = kwargs["hand_results"]
+        if len(hand_results.hand_landmarks) == 0:
+            self.prev_center = None
+            self.prev_radius = None
+
+            if self.background_filter is not None:
+                frame  = self.background_filter(frame.copy())
+            return frame
+
+        left_hand, right_hand = hand_landmark_separator(frame, self.draw_landmarks, hand_results)
+        if right_hand is not None:
+            self.update_background(right_hand)
+
+        if self.background_filter is not None:
+            frame = self.background_filter(frame.copy())
+
+        if left_hand is None:
+            return frame
+        
+        spotlight = self.get_spotlight(left_hand, frame)
+        if spotlight is None:
+            return frame
+
+        center, radius = spotlight
+
+        if radius <= 1:
+            return frame
+
+        self.update_filter([left_hand])
 
         cx, cy = center
 

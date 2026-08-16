@@ -4,7 +4,8 @@ from .effects import (
     PolyPipeline,
     CirclePipeline,
     SpotlightPipeline,
-    SelfieSegmentation
+    SelfieSegmentation,
+    SpotlightBackground
 )
 
 __all__ = [
@@ -13,5 +14,6 @@ __all__ = [
     PolyPipeline,
     CirclePipeline,
     SpotlightPipeline,
-    SelfieSegmentation
+    SelfieSegmentation,
+    SpotlightBackground
 ]

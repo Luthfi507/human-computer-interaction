@@ -1,7 +1,14 @@
 import cv2
 import mediapipe as mp
 
-from engines import RectanglePipeline, PolyPipeline, CirclePipeline, SpotlightPipeline, SelfieSegmentation
+from engines import (
+    RectanglePipeline, 
+    PolyPipeline, 
+    CirclePipeline, 
+    SpotlightPipeline, 
+    SelfieSegmentation,
+    SpotlightBackground
+)
 from utils import HAND_DETECTOR, SEGMENTER
 
 MODES = {
@@ -9,7 +16,8 @@ MODES = {
     'poly': PolyPipeline, 
     'circle': CirclePipeline, 
     'splotlight': SpotlightPipeline, 
-    'selfie': SelfieSegmentation
+    'selfie': SelfieSegmentation,
+    'spotbg': SpotlightBackground,
 }
 mode_name = list(MODES.keys())
 
@@ -40,7 +48,6 @@ class Effect:
             if not ok:
                 break
 
-            frame = cv2.flip(frame, 1)
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(mp.ImageFormat.SRGB, rgb)
 
@@ -51,9 +58,10 @@ class Effect:
                 seg_results = SEGMENTER.segment(mp_image)
 
             frame = processor.process(frame=frame, hand_results=hand_results, seg_results=seg_results)
+            frame = cv2.flip(frame, 1)
 
             cv2.imshow(
-                self._mode_name.capitalize(),
+                "camera",
                 cv2.resize(frame, None, fx=2, fy=2)
                 # frame
             )
