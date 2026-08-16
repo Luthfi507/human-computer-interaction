@@ -3,7 +3,7 @@ import numpy as np
 import random
 
 from tools import FILTERS, HandController
-from utils import draw_hand_landmarks, landmark_to_pixel
+from utils import landmark_to_pixel, draw_hand_landmarks, hand_landmark_separator
 hand_controller = HandController()
 
 class Pinch:
@@ -31,21 +31,7 @@ class RectanglePipeline(Pinch):
         self.committed_regions = []
 
     def get_points(self, frame, hand_results):
-        left_hand = None
-        right_hand = None
-
-        for landmarks, handedness in zip(
-            hand_results.hand_landmarks, hand_results.handedness
-        ):
-            if self.draw_landmarks:
-                draw_hand_landmarks(frame, landmarks)
-            hand_name = handedness[0].category_name
-
-            if hand_name == "Left":
-                left_hand = landmarks
-            elif hand_name == "Right":
-                right_hand = landmarks
-
+        left_hand, right_hand = hand_landmark_separator(frame, self.draw_landmarks, hand_results)
         if left_hand is None or right_hand is None:
             return
 
@@ -137,26 +123,12 @@ class PolyPipeline(Pinch):
         order = np.argsort(angles)
         return points[order]
 
-    def get_poly_point(self, results, frame):
-        if len(results.hand_landmarks) < 2:
+    def get_poly_point(self, hand_results, frame):
+        if len(hand_results.hand_landmarks) < 2:
             self.prev_points = None
             return
-
-        left_hand = None
-        right_hand = None
-
-        for landmarks, handedness in zip(
-            results.hand_landmarks, results.handedness
-        ):
-            if self.draw_landmarks:
-                draw_hand_landmarks(frame, landmarks)
-            hand_name = handedness[0].category_name
-
-            if hand_name == "Left":
-                left_hand = landmarks
-            elif hand_name == "Right":
-                right_hand = landmarks
-
+        
+        left_hand, right_hand = hand_landmark_separator(frame, self.draw_landmarks, hand_results)
         if left_hand is None or right_hand is None:
             self.prev_points = None
             return
@@ -218,31 +190,13 @@ class CirclePipeline(Pinch):
 
         return center, radius
 
-    def get_circle(self, results, frame):
-        if len(results.hand_landmarks) < 2:
+    def get_circle(self, hand_results, frame):
+        if len(hand_results.hand_landmarks) < 2:
             self.prev_radius = None
             self.prev_center = None
             return
-
-
-        left_hand = None
-        right_hand = None
-
-        for landmarks, handedness in zip(
-            results.hand_landmarks,
-            results.handedness
-        ):
-            if self.draw_landmarks:
-                draw_hand_landmarks(frame, landmarks)
-
-            hand_name = handedness[0].category_name
-
-            if hand_name == "Left":
-                left_hand = landmarks
-
-            elif hand_name == "Right":
-                right_hand = landmarks
-
+        
+        left_hand, right_hand = hand_landmark_separator(frame, self.draw_landmarks, hand_results)
         if left_hand is None or right_hand is None:
             self.prev_center = None
             self.prev_radius = None
