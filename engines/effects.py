@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import random
 
 from tools import FILTERS, HandController
 from utils import draw_hand_landmarks, landmark_to_pixel
@@ -13,7 +14,7 @@ class Pinch:
         ):
         self.draw_landmarks = draw_landmarks
         self.threshold = threshold
-        self.current_filter = 0
+        self.current_filter = random.choice(FILTERS)
         
     def update_filter(self, hand_landmarks):
         if len(hand_landmarks) < 1:
@@ -22,9 +23,7 @@ class Pinch:
         pinching = hand_controller.update(hand_landmarks)
 
         if pinching:
-            self.current_filter = (
-                self.current_filter + 1
-            ) % len(FILTERS)
+            self.current_filter = random.choice(FILTERS)
 
 class RectanglePipeline(Pinch):
     def __init__(self, draw_landmarks=False, threshold=0.05):
@@ -59,17 +58,18 @@ class RectanglePipeline(Pinch):
         y2 = max(left_index[1], right_index[1])
         return x1, y1, x2, y2
 
-    def filter_region(self, frame, points, filter_idx):
+    def filter_region(self, frame, points, current_filter):
         x1, y1, x2, y2 = points
         roi = frame[y1:y2, x1:x2]
 
         if roi.size == 0:
             return
 
-        filtered_roi = FILTERS[filter_idx](roi)
+        filtered_roi = current_filter(roi)
         frame[y1:y2, x1:x2] = filtered_roi
 
-    def process(self, frame: np.ndarray, hand_results):
+    def process(self, frame: np.ndarray, **kwargs):
+        hand_results = kwargs['hand_results']
         for region in self.committed_regions:
             self.filter_region(
                 frame,
@@ -161,10 +161,10 @@ class PolyPipeline(Pinch):
             self.prev_points = None
             return
 
-        left_thumb = landmark_to_pixel(frame, left_hand[4])
-        left_index = landmark_to_pixel(frame, left_hand[8])
-        right_thumb = landmark_to_pixel(frame, right_hand[4])
-        right_index = landmark_to_pixel(frame, right_hand[8])
+        left_thumb = landmark_to_pixel(left_hand[4], frame)
+        left_index = landmark_to_pixel(left_hand[8], frame)
+        right_thumb = landmark_to_pixel(right_hand[4], frame)
+        right_index = landmark_to_pixel(right_hand[8], frame)
 
         points = np.array([
             left_thumb, left_index, right_index, right_thumb
@@ -173,7 +173,8 @@ class PolyPipeline(Pinch):
         points = self.smooth_points(points)
         return np.round(points).astype(np.int32)
 
-    def process(self, frame: np.ndarray, hand_results):
+    def process(self, frame: np.ndarray, **kwargs):
+        hand_results = kwargs['hand_results']
         points = self.get_poly_point(hand_results, frame)
         if points is None:
             return frame
@@ -182,7 +183,7 @@ class PolyPipeline(Pinch):
         x, y, w, h = cv2.boundingRect(points)
 
         roi = frame[y:y+h, x:x+w]
-        filtered_roi = FILTERS[self.current_filter](roi)
+        filtered_roi = self.current_filter(roi)
 
         local_points = points - np.array([x, y])
         mask = np.zeros((h, w), dtype=np.uint8)
@@ -247,8 +248,8 @@ class CirclePipeline(Pinch):
             self.prev_radius = None
             return
 
-        left_index = landmark_to_pixel(frame, left_hand[8])
-        right_index = landmark_to_pixel(frame, right_hand[8])
+        left_index = landmark_to_pixel(left_hand[8], frame)
+        right_index = landmark_to_pixel(right_hand[8], frame)
 
         left_index = np.array(left_index, dtype=np.float32)
         right_index = np.array(right_index, dtype=np.float32)
@@ -263,7 +264,8 @@ class CirclePipeline(Pinch):
 
         return center, radius
 
-    def process(self, frame: np.ndarray, hand_results):
+    def process(self, frame: np.ndarray, **kwargs):
+        hand_results = kwargs['hand_results']
         circle = self.get_circle(hand_results, frame)
 
         if circle is None:
@@ -287,7 +289,7 @@ class CirclePipeline(Pinch):
 
         roi = frame[y1:y2,x1:x2]
 
-        filtered_roi = FILTERS[self.current_filter](roi.copy())
+        filtered_roi = self.current_filter(roi.copy())
 
         local_center = (cx - x1,cy - y1)
         mask = np.zeros(roi.shape[:2], dtype=np.uint8)
@@ -330,8 +332,8 @@ class SpotlightPipeline(Pinch):
         if self.draw_landmarks:
             draw_hand_landmarks(frame, landmarks)
 
-        index_tip = landmark_to_pixel(frame, landmarks[8])
-        thumb_tip = landmark_to_pixel(frame, landmarks[4])
+        index_tip = landmark_to_pixel(landmarks[8], frame)
+        thumb_tip = landmark_to_pixel(landmarks[4], frame)
 
         index_tip = np.array(index_tip, dtype=np.float32)
         thumb_tip = np.array(thumb_tip, dtype=np.float32)
@@ -345,7 +347,8 @@ class SpotlightPipeline(Pinch):
         radius = int(round(radius))
         return center, radius
 
-    def process(self, frame: np.ndarray, hand_results):
+    def process(self, frame: np.ndarray, **kwargs):
+        hand_results = kwargs['hand_results']
         spotlight = self.get_spotlight(hand_results,frame)
 
         if spotlight is None:
@@ -372,7 +375,7 @@ class SpotlightPipeline(Pinch):
         if roi.size  == 0:
             return frame
 
-        filtered_roi = FILTERS[self.current_filter](roi.copy())
+        filtered_roi = self.current_filter(roi.copy())
 
         local_center = (cx - x1, cy - y1)
         mask = np.zeros(roi.shape[:2], dtype=np.uint8)
@@ -385,16 +388,18 @@ class SelfieSegmentation(Pinch):
     def __init__(self, draw_landmarks=False, threshold=0.05):
         super().__init__(draw_landmarks, threshold)
 
-    def process(self, frame, results, hand_results):
+    def process(self, frame, **kwargs):
+        hand_results = kwargs['hand_results']
+        seg_results = kwargs['seg_results']
         if self.draw_landmarks:
             for landmarks in hand_results.hand_landmarks:
                 draw_hand_landmarks(frame, landmarks)
 
         self.update_filter(hand_results.hand_landmarks)        
-        mask = results.category_mask.numpy_view().squeeze()
+        mask = seg_results.category_mask.numpy_view().squeeze()
         person_mask = mask > 0
 
-        filtered_frame = FILTERS[self.current_filter](frame.copy())
+        filtered_frame = self.current_filter(frame.copy())
         frame[person_mask] = filtered_frame[person_mask]
 
         return frame
