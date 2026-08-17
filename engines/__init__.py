@@ -9,11 +9,11 @@ from .effects import (
 )
 
 __all__ = [
-    Pinch,
-    RectanglePipeline,
-    PolyPipeline,
-    CirclePipeline,
-    SpotlightPipeline,
-    SelfieSegmentation,
-    SpotlightBackground
+    "Pinch",
+    "RectanglePipeline",
+    "PolyPipeline",
+    "CirclePipeline",
+    "SpotlightPipeline",
+    "SelfieSegmentation",
+    "SpotlightBackground",
 ]
