@@ -9,17 +9,19 @@ from engines import (
     SelfieSegmentation,
     SpotlightBackground
 )
-from utils import HAND_DETECTOR, SEGMENTER
+from utils import HAND_DETECTOR, SEGMENTER, FACE_DETECTOR
+from tools import FaceExpression
 
 MODES = {
-    'rectangle': RectanglePipeline, 
-    'poly': PolyPipeline, 
-    'circle': CirclePipeline, 
-    'splotlight': SpotlightPipeline, 
-    'selfie': SelfieSegmentation,
     'spotbg': SpotlightBackground,
+    'splotlight': SpotlightPipeline, 
+    'circle': CirclePipeline, 
+    'poly': PolyPipeline, 
+    'rectangle': RectanglePipeline, 
+    'selfie': SelfieSegmentation,
 }
 mode_name = list(MODES.keys())
+expression = FaceExpression(0.5)
 
 class Effect:
     def __init__(self, draw: bool = False, camera=0):
@@ -52,6 +54,7 @@ class Effect:
             mp_image = mp.Image(mp.ImageFormat.SRGB, rgb)
 
             hand_results = HAND_DETECTOR.detect(mp_image)
+            face_results = FACE_DETECTOR.detect(mp_image)
             seg_results = None
 
             if self._mode_name in ["selfie"]:
@@ -60,6 +63,28 @@ class Effect:
             frame = processor.process(frame=frame, hand_results=hand_results, seg_results=seg_results)
             frame = cv2.flip(frame, 1)
 
+            cv2.putText(
+                frame,
+                f"Mode: {self._mode_name}",
+                (20, 40),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 255, 255),
+                2
+            )
+
+            face_blendshapes = face_results.face_blendshapes
+            if face_blendshapes:
+                trigger = expression.update(
+                    face_blendshapes[0], 
+                    [
+                        ("is_brow_up", {"threshold": 0.01})
+                    ]
+                )
+
+                if trigger:
+                    processor = self.update_mode()
+
             cv2.imshow(
                 "camera",
                 cv2.resize(frame, None, fx=2, fy=2)
@@ -67,9 +92,7 @@ class Effect:
             )
 
             key = cv2.waitKey(1) & 0xFF
-            if key == ord("n"):
-                processor = self.update_mode()
-            elif key == ord("q"):
+            if key == ord("q"):
                 break
 
         self.cap.release()

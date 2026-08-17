@@ -5,6 +5,7 @@ class FaceExpression:
         self.min_durations = min_durations
         self.blendshapes = {}
         self.start_times = {}
+        self.triggered = {}
 
     def get_blendshapes(self, face_blendshapes):
         self.blendshapes = {
@@ -14,6 +15,28 @@ class FaceExpression:
 
     def get(self, name):
         return self.blendshapes.get(name, 0.0)
+
+    def update(self, face_blendshapes, conditions: list):
+        self.get_blendshapes(face_blendshapes)
+        now = time()
+
+        for method_name, kwargs in conditions:
+            if method_name not in self.triggered:
+                self.triggered[method_name] = False
+
+            method = getattr(self, method_name)
+            condition = method(**kwargs)
+
+            if condition:
+                duration = now - self.start_times[method_name]
+
+                if duration >= self.min_durations and not self.triggered[method_name]:
+                    self.triggered[method_name] = True
+                    return True
+            else:
+                self.triggered[method_name] = False
+
+            return False
 
     def _validate(self, name, conditions):
         now = time()
@@ -37,5 +60,5 @@ class FaceExpression:
 
     def is_brow_up(self, threshold=0.01):
         condition = self.get("browDownLeft") <= threshold
-        return self._validate("brow up", condition)
+        return self._validate("is_brow_up", condition)
         
