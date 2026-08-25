@@ -7,7 +7,8 @@ from engines import (
     CirclePipeline, 
     SpotlightPipeline, 
     SelfieSegmentation,
-    SpotlightBackground
+    SpotlightBackground,
+    Inivisible
 )
 from utils import HAND_DETECTOR, SEGMENTER, FACE_DETECTOR
 from tools import FaceExpression
@@ -30,6 +31,7 @@ class Effect:
         self.current_mode = 0
         self.cap = None
         self._mode_name = mode_name[self.current_mode]
+        self.invisible = Inivisible()
 
     def get_camera(self):
         self.cap = cv2.VideoCapture(self.camera)
@@ -53,25 +55,13 @@ class Effect:
             rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
             mp_image = mp.Image(mp.ImageFormat.SRGB, rgb)
 
-            hand_results = HAND_DETECTOR.detect(mp_image)
+            hand_results = HAND_DETECTOR.recognize(mp_image)
             face_results = FACE_DETECTOR.detect(mp_image)
-            seg_results = None
-
-            if self._mode_name in ["selfie"]:
-                seg_results = SEGMENTER.segment(mp_image)
+            seg_results = SEGMENTER.segment(mp_image)
 
             frame = processor.process(frame=frame, hand_results=hand_results, seg_results=seg_results)
+            frame = self.invisible.process(frame, hand_results=hand_results, seg_results=seg_results)
             frame = cv2.flip(frame, 1)
-
-            cv2.putText(
-                frame,
-                f"Mode: {self._mode_name}",
-                (20, 40),
-                cv2.FONT_HERSHEY_SIMPLEX,
-                1,
-                (255, 255, 255),
-                2
-            )
 
             face_blendshapes = face_results.face_blendshapes
             if face_blendshapes:
@@ -83,11 +73,12 @@ class Effect:
                 )
 
                 if trigger:
+                    print(self._mode_name)
                     processor = self.update_mode()
 
             cv2.imshow(
                 "camera",
-                cv2.resize(frame, None, fx=2, fy=2)
+                cv2.resize(frame, None, fx=1.5, fy=1.5)
                 # frame
             )
 

@@ -8,6 +8,10 @@ from .effects import (
     SpotlightBackground
 )
 
+from .portals import (
+    Inivisible
+)
+
 __all__ = [
     "Pinch",
     "RectanglePipeline",
@@ -16,4 +20,5 @@ __all__ = [
     "SpotlightPipeline",
     "SelfieSegmentation",
     "SpotlightBackground",
+    "Inivisible",
 ]
