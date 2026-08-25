@@ -22,6 +22,12 @@ class HandController:
         distance = min(distances)
         return distance <= threshold
 
+    def gesture_category(self, hand_results, category: str):
+        gestures = hand_results.gestures
+
+        for gesture in gestures:
+            return gesture[0].category_name.lower() == category.lower()
+
     def update(self, landmarks, threshold=0.05):
         current_time = time()
         triggered = False
