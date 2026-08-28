@@ -1,3 +1,7 @@
 mediapipe
 opencv-python
 loguru
+pyrender
+trimesh
+pyglet
+PyOpenGL==3.1.10
