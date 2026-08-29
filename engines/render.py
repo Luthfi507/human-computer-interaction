@@ -1,3 +1,4 @@
+import cv2
 import numpy as np
 import trimesh
 import pyrender
@@ -15,16 +16,36 @@ class HandObjectRenderer:
         min_scale=0.3,
         max_scale=1.5,
         scale_smoothing=0.3,
+        follow_hand_rotation=True,
+        collision_margin=0.05,
+        collision_color=(0, 100, 255),
+        collision_tint_strength=0.35,
+        glow_strength=0.7,
     ):
         self.model_path = model_path
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
+
         self.min_pinch_distance = min_pinch_distance
         self.max_pinch_distance = max_pinch_distance
+
         self.min_scale = min_scale
         self.max_scale = max_scale
         self.scale_smoothing = scale_smoothing
         self.current_scale = min_scale
+        self.follow_hand_rotation = follow_hand_rotation
+
+        self.collision_margin = collision_margin
+        self.collision_color = np.array(
+            collision_color,
+            dtype=np.float32
+        )
+
+        self.collision_tint_strength = collision_tint_strength
+        self.glow_strength = glow_strength
+
+        self.is_colliding = False
+        self.effect_phase = 0.0
 
         self.scene = pyrender.Scene(
             bg_color=[0, 0, 0, 0],
@@ -89,15 +110,93 @@ class HandObjectRenderer:
         index_tip = hand_landmarks[8]
         return ((thumb_tip.x - index_tip.x) ** 2 + (thumb_tip.y - index_tip.y) ** 2) ** 0.5
 
-    def compute_hand_transform(self, hand_landmarks):
+    @staticmethod
+    def _normalize(vector):
+        norm = np.linalg.norm(vector)
+        if norm < 1e-6:
+            return vector
+
+        return vector / norm
+
+    def _hand_rotation(self, hand_landmarks):
+        wrist = hand_landmarks[0]
+        index = hand_landmarks[5]
+        pinky = hand_landmarks[17]
+
+        p0 = np.array([
+            wrist.x,
+            -wrist.y,
+            -wrist.z
+        ], dtype=np.float32)
+
+        p5 = np.array([
+            index.x,
+            -index.y,
+            -index.z
+        ], dtype=np.float32)
+
+        p17 = np.array([
+            pinky.x,
+            -pinky.y,
+            -pinky.z
+        ], dtype=np.float32)
+
+        palm_center = (p5 + p17) / 2.0
+        y_hint = self._normalize(palm_center - p0)
+
+        x_axis = self._normalize(p5 - p17)
+        z_axis = self._normalize(np.cross(x_axis, y_hint))
+        y_axis = self._normalize(np.cross(z_axis, x_axis))
+
+        rotation = np.column_stack([x_axis, y_axis, z_axis])
+
+        return rotation.astype(np.float32)
+
+    def _check_torso_collision(self, center_x, center_y, pose_landmarks):
+        if pose_landmarks is None:
+            return False
+
+        if len(pose_landmarks) <= 24:
+            return False
+
+        ids = [11, 12, 23, 24]
+
+        xs = [
+            pose_landmarks[i].x
+            for i in ids
+        ]
+
+        ys = [
+            pose_landmarks[i].y
+            for i in ids
+        ]
+
+        left = min(xs) - self.collision_margin
+        right = max(xs) + self.collision_margin
+
+        top = min(ys) - self.collision_margin
+        bottom = max(ys) + self.collision_margin
+
+        inside_x = left <= center_x <= right
+        inside_y = top <= center_y <= bottom
+
+        return inside_x and inside_y
+
+    def compute_hand_transform(self, hand_landmarks, pose_landmarks=None):
         center_x, center_y = self._palm_center(hand_landmarks)
         pinch_distance = self._pinch_distance(hand_landmarks)
 
         x_range = 2.2
         y_range = 1.6
+        hand_z = hand_landmarks[9].z
 
         x = (center_x - 0.5) * x_range
         y = (0.5 - center_y) * y_range
+        z = np.interp(
+            hand_z,
+            [-0.3, 0.2],
+            [1.0, -1.0]
+        )
 
         target_scale = np.interp(
             pinch_distance,
@@ -111,38 +210,74 @@ class HandObjectRenderer:
             + (1.0 - self.scale_smoothing) * self.current_scale
         )
 
-        return x, y, self.current_scale
+        rotation = self._hand_rotation(hand_landmarks)
+        self.is_colliding = self._check_torso_collision(center_x, center_y, pose_landmarks)
 
-    @staticmethod
-    def build_pose(angle, x, y, scale):
-        pose = np.array([
-            [np.cos(angle), 0, np.sin(angle), x],
-            [0, 1, 0, y],
-            [-np.sin(angle), 0, np.cos(angle), 0],
-            [0, 0, 0, 1],
+        return x, y, z, self.current_scale, rotation
+
+    def build_pose(self, angle, x, y, z, scale, hand_rotation=None):
+        rotation_y = np.array([
+            [np.cos(angle), 0, np.sin(angle)],
+            [0, 1, 0],
+            [-np.sin(angle), 0, np.cos(angle)],
         ], dtype=np.float32)
 
-        pose[:3, :3] *= scale
+        if self.follow_hand_rotation and hand_rotation is not None:
+            rotation = hand_rotation @ rotation_y
+        else:
+            rotation = rotation_y
+
+        if self.is_colliding:
+            self.effect_phase += 0.25
+
+            pulse = 1.0 + 0.12 * (
+                0.5 + 0.5 * np.sin(self.effect_phase)
+            )
+
+            scale *= pulse
+
+        pose = np.eye(4, dtype=np.float32)
+        pose[:3, :3] = rotation * scale
+
+        pose[0, 3] = x
+        pose[1, 3] = y
+        pose[2, 3] = z
+
         return pose
 
-    def update_pose(self, hand_landmarks, angle):
-        x, y, scale = self.compute_hand_transform(hand_landmarks)
-        pose = self.build_pose(angle, x, y, scale)
+    def update_pose(self, hand_landmarks, angle, pose_landmarks=None):
+        x, y, z, scale, hand_rotation = self.compute_hand_transform(hand_landmarks, pose_landmarks)
+        pose = self.build_pose(angle, x, y, z, scale, hand_rotation)
 
         for node in self.nodes:
             self.scene.set_pose(node, pose)
+
+        return self.is_colliding
 
     def render(self, width, height, flags=pyrender.RenderFlags.RGBA):
         self.resize(width, height)
         return self.renderer.render(self.scene, flags=flags)
 
-    def render_overlay(self, frame, flags=pyrender.RenderFlags.RGBA):
+    def render_overlay(self, frame: np.ndarray, flags=pyrender.RenderFlags.RGBA):
         frame_h, frame_w = frame.shape[:2]
         color, depth = self.render(frame_w, frame_h, flags=flags)
 
-        rgb = color[:, :, :3].astype(np.float32)
-        alpha = (color[:, :, 3].astype(np.float32) / 255.0)[:, :, None]
-        output = rgb * alpha + frame.astype(np.float32) * (1.0 - alpha)
+        bgr = color[:, :, :3].astype(np.float32)[:, :, ::-1]
+        alpha = color[:, :, 3].astype(np.float32) / 255.0
+
+        background = frame.astype(np.float32)
+
+        if self.is_colliding:
+            bgr = bgr * (
+                1.0 - self.collision_tint_strength
+            ) + self.collision_color * self.collision_tint_strength
+
+            glow = cv2.GaussianBlur(alpha, (0, 0), sigmaX=12, sigmaY=12)
+            glow = np.clip(glow - alpha, 0.0, 1.0)
+
+            background = background + glow[:, :, None] * self.collision_tint_strength * self.collision_color
+
+        output = bgr * alpha[:, :, None] + background * (1.0 - alpha[:, :, None])
 
         return np.clip(output, 0, 255).astype(np.uint8), depth
 
