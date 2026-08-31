@@ -3,7 +3,7 @@ import numpy as np
 import trimesh
 import pyrender
 
-MODEL_PATH = "assets/orangutan.glb"
+MODEL_PATH = "assets/arrow.glb"
 
 class HandObjectRenderer:
     def __init__(
@@ -98,17 +98,29 @@ class HandObjectRenderer:
         self.viewport_height = height
 
     @staticmethod
-    def _palm_center(hand_landmarks):
+    def euclid_distance(a, b):
+        return np.sqrt(a**2 + b**2)
+    
+    def clamp_to_wrist(self, hand_landmarks, max_distance=0.12):
         palm_ids = [0, 5, 9, 13, 17]
         center_x = np.mean([hand_landmarks[i].x for i in palm_ids])
         center_y = np.mean([hand_landmarks[i].y for i in palm_ids])
-        return center_x, center_y
+        wrist = hand_landmarks[0]
 
-    @staticmethod
-    def _pinch_distance(hand_landmarks):
-        thumb_tip = hand_landmarks[4]
-        index_tip = hand_landmarks[8]
-        return ((thumb_tip.x - index_tip.x) ** 2 + (thumb_tip.y - index_tip.y) ** 2) ** 0.5
+        dx = center_x - wrist.x
+        dy = center_y - wrist.y
+
+        distance = self.euclid_distance(dx, dy)
+        if distance <= max_distance:
+            return center_x, center_y
+
+        direction_x = dx / distance
+        direction_y = dy / distance
+
+        center_x = wrist.x + direction_x * max_distance
+        center_y = wrist.y + direction_y * max_distance
+
+        return center_x, center_y
 
     @staticmethod
     def _normalize(vector):
@@ -183,8 +195,10 @@ class HandObjectRenderer:
         return inside_x and inside_y
 
     def compute_hand_transform(self, hand_landmarks, pose_landmarks=None):
-        center_x, center_y = self._palm_center(hand_landmarks)
-        pinch_distance = self._pinch_distance(hand_landmarks)
+        center_x, center_y = self.clamp_to_wrist(hand_landmarks)
+        thumb_tip = hand_landmarks[4]
+        index_tip = hand_landmarks[8]
+        pinch_distance = self.euclid_distance((thumb_tip.x - index_tip.x), (thumb_tip.y - index_tip.y))
 
         x_range = 2.2
         y_range = 1.6
@@ -285,3 +299,36 @@ class HandObjectRenderer:
         if self.renderer is not None:
             self.renderer.delete()
             self.renderer = None
+
+    def get_object_bbox(self, depth, padding=5):
+        mask = depth > 0
+        ys, xs = np.where(mask)
+
+        if len(xs) == 0 or len(ys) == 0:
+            return None
+
+        x1 = max(int(xs.min()) - padding, 0)
+        y1 = max(int(ys.min()) - padding, 0)
+    
+        x2 = min(int(xs.max()) + padding, depth.shape[1] - 1)
+        y2 = min(int(ys.max()) + padding, depth.shape[0] - 1)
+    
+        return x1, y1, x2, y2
+
+    def draw_object_bbox(self, frame, depth, color=(0, 255, 0), thickness=2, padding=5):
+        bbox = self.get_object_bbox(depth, padding)
+
+        if bbox is None:
+            return frame
+
+        x1, y1, x2, y2 = bbox
+
+        cv2.rectangle(
+            frame,
+            (x1, y1),
+            (x2, y2),
+            color,
+            thickness
+        )
+
+        return frame
