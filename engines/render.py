@@ -3,28 +3,35 @@ import numpy as np
 import trimesh
 import pyrender
 
-MODEL_PATH = "assets/arrow.glb"
-
 class HandObjectRenderer:
     def __init__(
         self,
-        model_path=MODEL_PATH,
+        model_path,
         viewport_width=640,
         viewport_height=480,
+        x_pose=0,
+        y_pose=0,
+        z_pose=0,
+        camera_pose=3.0,
         min_pinch_distance=0.02,
         max_pinch_distance=0.25,
         min_scale=0.3,
         max_scale=1.5,
         scale_smoothing=0.3,
-        follow_hand_rotation=True,
         collision_margin=0.05,
         collision_color=(0, 100, 255),
         collision_tint_strength=0.35,
         glow_strength=0.7,
+        debug=False,
     ):
         self.model_path = model_path
         self.viewport_width = viewport_width
         self.viewport_height = viewport_height
+
+        self.x_pose = x_pose
+        self.y_pose = y_pose
+        self.z_pose = z_pose
+        self.camera_pose = camera_pose
 
         self.min_pinch_distance = min_pinch_distance
         self.max_pinch_distance = max_pinch_distance
@@ -33,7 +40,6 @@ class HandObjectRenderer:
         self.max_scale = max_scale
         self.scale_smoothing = scale_smoothing
         self.current_scale = min_scale
-        self.follow_hand_rotation = follow_hand_rotation
 
         self.collision_margin = collision_margin
         self.collision_color = np.array(
@@ -45,7 +51,14 @@ class HandObjectRenderer:
         self.glow_strength = glow_strength
 
         self.is_colliding = False
+        self._was_colliding = False
         self.effect_phase = 0.0
+
+        self.yfov = np.pi / 3.0
+
+        self.debug = debug
+        self._debug_frame_count = 0
+        self._debug_max_frames = 3
 
         self.scene = pyrender.Scene(
             bg_color=[0, 0, 0, 0],
@@ -61,19 +74,35 @@ class HandObjectRenderer:
     def _load_model(self):
         tm_scene = trimesh.load(self.model_path)
 
-        if isinstance(tm_scene, trimesh.Scene):
-            for geometry in tm_scene.geometry.values():
-                mesh = pyrender.Mesh.from_trimesh(geometry, smooth=False)
-                self.nodes.append(self.scene.add(mesh))
-            return
+        if not isinstance(tm_scene, trimesh.Scene):
+            tm_scene = trimesh.Scene(tm_scene)
 
-        mesh = pyrender.Mesh.from_trimesh(tm_scene, smooth=False)
-        self.nodes.append(self.scene.add(mesh))
+        bounds_before = tm_scene.bounding_box.bounds
+        extents_before = tm_scene.bounding_box.extents
+
+        centroid = tm_scene.bounding_box.centroid
+        tm_scene.apply_translation(-centroid)
+
+        extent_max = float(tm_scene.bounding_box.extents.max())
+        if extent_max > 1e-8:
+            tm_scene.apply_scale(1.0 / extent_max)
+        else:
+            print(f"[WARN] Model '{self.model_path}' has an extent close to zero, so it was not normalized.")
+
+        if self.debug:
+            print(f"[DEBUG] model: {self.model_path}")
+            print(f"[DEBUG] bounds before center : {bounds_before.tolist()}")
+            print(f"[DEBUG] extents before normalize: {extents_before.tolist()}")
+            print(f"[DEBUG] bounds after center+normalize: {tm_scene.bounding_box.bounds.tolist()}")
+
+        for geometry in tm_scene.geometry.values():
+            mesh = pyrender.Mesh.from_trimesh(geometry, smooth=False)
+            self.nodes.append(self.scene.add(mesh))
 
     def _add_camera(self):
-        camera = pyrender.PerspectiveCamera(yfov=np.pi / 3.0)
+        camera = pyrender.PerspectiveCamera(yfov=self.yfov)
         camera_pose = np.eye(4, dtype=np.float32)
-        camera_pose[2, 3] = 3.0
+        camera_pose[2, 3] = self.camera_pose
         self.scene.add(camera, pose=camera_pose)
 
     def _add_light(self):
@@ -98,9 +127,21 @@ class HandObjectRenderer:
         self.viewport_height = height
 
     @staticmethod
-    def euclid_distance(a, b):
-        return np.sqrt(a**2 + b**2)
-    
+    def delta_distance(dx, dy):
+        return np.sqrt(dx ** 2 + dy ** 2)
+
+    def normalize(self, vector, fallback=(1.0, 0.0, 0.0)):
+        norm = np.linalg.norm(vector)
+        if norm < 1e-6:
+            return np.array(fallback, dtype=np.float32)
+        return vector / norm
+
+    def frustum_range_at(self, z_distance):
+        half_height = z_distance * np.tan(self.yfov / 2.0)
+        aspect = self.viewport_width / self.viewport_height
+        half_width = half_height * aspect
+        return 2.0 * half_width, 2.0 * half_height
+
     def clamp_to_wrist(self, hand_landmarks, max_distance=0.12):
         palm_ids = [0, 5, 9, 13, 17]
         center_x = np.mean([hand_landmarks[i].x for i in palm_ids])
@@ -110,7 +151,7 @@ class HandObjectRenderer:
         dx = center_x - wrist.x
         dy = center_y - wrist.y
 
-        distance = self.euclid_distance(dx, dy)
+        distance = self.delta_distance(dx, dy)
         if distance <= max_distance:
             return center_x, center_y
 
@@ -122,49 +163,30 @@ class HandObjectRenderer:
 
         return center_x, center_y
 
-    @staticmethod
-    def _normalize(vector):
-        norm = np.linalg.norm(vector)
-        if norm < 1e-6:
-            return vector
-
-        return vector / norm
-
-    def _hand_rotation(self, hand_landmarks):
+    def hand_rotation(self, hand_landmarks):
         wrist = hand_landmarks[0]
         index = hand_landmarks[5]
         pinky = hand_landmarks[17]
 
-        p0 = np.array([
-            wrist.x,
-            -wrist.y,
-            -wrist.z
-        ], dtype=np.float32)
-
-        p5 = np.array([
-            index.x,
-            -index.y,
-            -index.z
-        ], dtype=np.float32)
-
-        p17 = np.array([
-            pinky.x,
-            -pinky.y,
-            -pinky.z
-        ], dtype=np.float32)
+        p0 = np.array([wrist.x, -wrist.y, -wrist.z], dtype=np.float32)
+        p5 = np.array([index.x, -index.y, -index.z], dtype=np.float32)
+        p17 = np.array([pinky.x, -pinky.y, -pinky.z], dtype=np.float32)
 
         palm_center = (p5 + p17) / 2.0
-        y_hint = self._normalize(palm_center - p0)
+        y_hint = self.normalize(palm_center - p0, fallback=(0.0, 1.0, 0.0))
 
-        x_axis = self._normalize(p5 - p17)
-        z_axis = self._normalize(np.cross(x_axis, y_hint))
-        y_axis = self._normalize(np.cross(z_axis, x_axis))
+        x_axis = self.normalize(p5 - p17, fallback=(1.0, 0.0, 0.0))
+
+        z_axis = np.cross(x_axis, y_hint)
+        z_axis = self.normalize(z_axis, fallback=(0.0, 0.0, 1.0))
+
+        y_axis = np.cross(z_axis, x_axis)
+        y_axis = self.normalize(y_axis, fallback=(0.0, 1.0, 0.0))
 
         rotation = np.column_stack([x_axis, y_axis, z_axis])
-
         return rotation.astype(np.float32)
 
-    def _check_torso_collision(self, center_x, center_y, pose_landmarks):
+    def check_torso_collision(self, center_x, center_y, pose_landmarks):
         if pose_landmarks is None:
             return False
 
@@ -172,20 +194,11 @@ class HandObjectRenderer:
             return False
 
         ids = [11, 12, 23, 24]
-
-        xs = [
-            pose_landmarks[i].x
-            for i in ids
-        ]
-
-        ys = [
-            pose_landmarks[i].y
-            for i in ids
-        ]
+        xs = [pose_landmarks[i].x for i in ids]
+        ys = [pose_landmarks[i].y for i in ids]
 
         left = min(xs) - self.collision_margin
         right = max(xs) + self.collision_margin
-
         top = min(ys) - self.collision_margin
         bottom = max(ys) + self.collision_margin
 
@@ -198,19 +211,17 @@ class HandObjectRenderer:
         center_x, center_y = self.clamp_to_wrist(hand_landmarks)
         thumb_tip = hand_landmarks[4]
         index_tip = hand_landmarks[8]
-        pinch_distance = self.euclid_distance((thumb_tip.x - index_tip.x), (thumb_tip.y - index_tip.y))
+        pinch_distance = self.delta_distance(
+            thumb_tip.x - index_tip.x,
+            thumb_tip.y - index_tip.y,
+        )
 
-        x_range = 2.2
-        y_range = 1.6
+        x_range, y_range = self.frustum_range_at(self.z_pose)
         hand_z = hand_landmarks[9].z
 
         x = (center_x - 0.5) * x_range
         y = (0.5 - center_y) * y_range
-        z = np.interp(
-            hand_z,
-            [-0.3, 0.2],
-            [1.0, -1.0]
-        )
+        z = np.interp(hand_z, [-0.3, 0.2], [1.0, -1.0])
 
         target_scale = np.interp(
             pinch_distance,
@@ -224,8 +235,13 @@ class HandObjectRenderer:
             + (1.0 - self.scale_smoothing) * self.current_scale
         )
 
-        rotation = self._hand_rotation(hand_landmarks)
-        self.is_colliding = self._check_torso_collision(center_x, center_y, pose_landmarks)
+        rotation = self.hand_rotation(hand_landmarks)
+
+        was_colliding = self.is_colliding
+        self.is_colliding = self.check_torso_collision(center_x, center_y, pose_landmarks)
+
+        if self.is_colliding and not was_colliding:
+            self.effect_phase = 0.0
 
         return x, y, z, self.current_scale, rotation
 
@@ -236,32 +252,30 @@ class HandObjectRenderer:
             [-np.sin(angle), 0, np.cos(angle)],
         ], dtype=np.float32)
 
-        if self.follow_hand_rotation and hand_rotation is not None:
+        if hand_rotation is not None:
             rotation = hand_rotation @ rotation_y
         else:
             rotation = rotation_y
 
         if self.is_colliding:
-            self.effect_phase += 0.25
-
-            pulse = 1.0 + 0.12 * (
-                0.5 + 0.5 * np.sin(self.effect_phase)
-            )
-
-            scale *= pulse
+            pulse = 1.0 + 0.12 * (0.5 + 0.5 * np.sin(self.effect_phase))
+            scale = scale * pulse
 
         pose = np.eye(4, dtype=np.float32)
         pose[:3, :3] = rotation * scale
 
-        pose[0, 3] = x
-        pose[1, 3] = y
-        pose[2, 3] = z
+        pose[0, 3] = x + self.x_pose
+        pose[1, 3] = y + self.y_pose
+        pose[2, 3] = z + self.z_pose
 
         return pose
 
     def update_pose(self, hand_landmarks, angle, pose_landmarks=None):
         x, y, z, scale, hand_rotation = self.compute_hand_transform(hand_landmarks, pose_landmarks)
         pose = self.build_pose(angle, x, y, z, scale, hand_rotation)
+
+        if self.is_colliding:
+            self.effect_phase += 0.25
 
         for node in self.nodes:
             self.scene.set_pose(node, pose)
@@ -270,7 +284,15 @@ class HandObjectRenderer:
 
     def render(self, width, height, flags=pyrender.RenderFlags.RGBA):
         self.resize(width, height)
-        return self.renderer.render(self.scene, flags=flags)
+        color, depth = self.renderer.render(self.scene, flags=flags)
+
+        if self.debug and self._debug_frame_count < self._debug_max_frames:
+            alpha_max = color[:, :, 3].max()
+            depth_max = depth.max()
+            print(f"[DEBUG render] depth_max={depth_max:.4f} alpha_max={alpha_max}")
+            self._debug_frame_count += 1
+
+        return color, depth
 
     def render_overlay(self, frame: np.ndarray, flags=pyrender.RenderFlags.RGBA):
         frame_h, frame_w = frame.shape[:2]
@@ -292,9 +314,13 @@ class HandObjectRenderer:
             background = background + glow[:, :, None] * self.collision_tint_strength * self.collision_color
 
         output = bgr * alpha[:, :, None] + background * (1.0 - alpha[:, :, None])
+        output = np.clip(output, 0, 255).astype(np.uint8)
 
-        return np.clip(output, 0, 255).astype(np.uint8), depth
+        if self.debug:
+            output = self.draw_object_bbox(output, depth)
 
+        return output, depth
+    
     def close(self):
         if self.renderer is not None:
             self.renderer.delete()
@@ -309,10 +335,10 @@ class HandObjectRenderer:
 
         x1 = max(int(xs.min()) - padding, 0)
         y1 = max(int(ys.min()) - padding, 0)
-    
+
         x2 = min(int(xs.max()) + padding, depth.shape[1] - 1)
         y2 = min(int(ys.max()) + padding, depth.shape[0] - 1)
-    
+
         return x1, y1, x2, y2
 
     def draw_object_bbox(self, frame, depth, color=(0, 255, 0), thickness=2, padding=5):
@@ -323,12 +349,6 @@ class HandObjectRenderer:
 
         x1, y1, x2, y2 = bbox
 
-        cv2.rectangle(
-            frame,
-            (x1, y1),
-            (x2, y2),
-            color,
-            thickness
-        )
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
 
         return frame

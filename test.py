@@ -10,7 +10,14 @@ cap = cv2.VideoCapture(0)
 if not cap:
     raise RuntimeError("No camera")
 
-glb_renderer = HandObjectRenderer()
+model_path = "assets/arrow.glb"
+
+params = {
+    "arrow": {"model_path": "assets/arrow.glb", "camera_pose": 200, "y_pose": -40},
+    "sword": {"model_path": "assets/sword.glb", "camera_pose": 300, "x_pose": -20},
+    "orangutan": {"model_path": "assets/orangutan.glb"}
+}
+glb_renderer = HandObjectRenderer(**params["sword"])
 angle = 0
 
 try:
@@ -26,7 +33,6 @@ try:
         pose_results = POSE_DETECTOR.detect(mp_image)
 
         if hand_results.hand_landmarks:
-            # angle += 0.2
             hand = hand_results.hand_landmarks[0]
 
             if pose_results.pose_landmarks:
@@ -36,7 +42,6 @@ try:
 
             glb_renderer.update_pose(hand, angle, pose)
             frame, depth = glb_renderer.render_overlay(frame)
-            frame = glb_renderer.draw_object_bbox(frame, depth)
 
         frame = cv2.flip(frame, 1)
         cv2.imshow(
